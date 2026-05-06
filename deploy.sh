@@ -288,9 +288,14 @@ start_container() {
     fi
 }
 
+# ===== 生成 Clash YAML =====
+generate_clash_config() {
+    bash "${SCRIPT_DIR}/scripts/generate-clash.sh" || log_warn "Clash 配置生成失败"
+}
+
 # ===== 显示部署信息 =====
 show_info() {
-    bash "${SCRIPT_DIR}/scripts/generate-qr.sh"
+    bash "${SCRIPT_DIR}/info.sh" || true
 
     if [[ -f /var/run/.ssr-bbrplus-need-reboot ]]; then
         echo
@@ -320,29 +325,32 @@ main() {
     check_root
     check_kernel_arch
 
-    log_step "1/8 加载配置"
+    log_step "1/9 加载配置"
     load_env
 
-    log_step "2/8 安装系统依赖"
+    log_step "2/9 安装系统依赖"
     install_deps
 
-    log_step "3/8 安装/启动 Docker"
+    log_step "3/9 安装/启动 Docker"
     install_docker
 
-    log_step "4/8 网络参数调优"
+    log_step "4/9 网络参数调优"
     bash "${SCRIPT_DIR}/scripts/tune-sysctl.sh" || log_warn "sysctl 调优失败，继续"
 
-    log_step "5/8 配置 BBR/BBR Plus 加速"
+    log_step "5/9 配置 BBR/BBR Plus 加速"
     bash "${SCRIPT_DIR}/scripts/install-bbr-plus.sh" || log_warn "BBR 配置失败，继续"
 
-    log_step "6/8 配置防火墙"
+    log_step "6/9 配置防火墙"
     configure_firewall
 
-    log_step "7/8 同步 SSR 配置 + 启动容器"
+    log_step "7/9 同步 SSR 配置 + 启动容器"
     sync_config
     start_container
 
-    log_step "8/8 附加项 + 输出信息"
+    log_step "8/9 生成 Clash YAML"
+    generate_clash_config
+
+    log_step "9/9 附加项 + 输出信息"
     install_fail2ban
     show_info
 }

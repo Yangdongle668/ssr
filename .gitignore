@@ -1,9 +1,10 @@
 # 用户配置（含密码，禁止提交）
 .env
 
-# 部署产物
+# 部署产物（含密码，禁止提交）
 ssr-info.txt
 ssr-qrcode.png
+clash.yaml
 logs/
 
 # 编辑器/系统
