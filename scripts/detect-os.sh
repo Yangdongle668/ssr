@@ -113,16 +113,25 @@ detect_bbr_status() {
     HAS_BBRPLUS="false"
     HAS_BBR="false"
 
-    [[ "${available}" =~ bbrplus ]] && HAS_BBRPLUS="true"
-    [[ "${available}" =~ (^|[[:space:]])bbr($|[[:space:]]) ]] && HAS_BBR="true"
+    # 注意：用 if 而不是 [[ ]] && var=...，因为后者作为函数最后一句
+    # 在不匹配时整个函数返回 1，会触发调用方 set -e 静默退出。
+    if [[ "${available}" =~ bbrplus ]]; then
+        HAS_BBRPLUS="true"
+    fi
+    if [[ "${available}" =~ (^|[[:space:]])bbr($|[[:space:]]) ]]; then
+        HAS_BBR="true"
+    fi
+
+    return 0
 }
 
 run_detection() {
-    detect_os
-    detect_arch
-    detect_virt
-    detect_kernel
-    detect_bbr_status
+    detect_os || true
+    detect_arch || true
+    detect_virt || true
+    detect_kernel || true
+    detect_bbr_status || true
+    return 0
 }
 
 # 当作为脚本直接执行时输出结果
