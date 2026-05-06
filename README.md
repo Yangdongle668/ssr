@@ -1,6 +1,26 @@
 # SSR Docker 一键部署
 
+[![GitHub](https://img.shields.io/badge/GitHub-Yangdongle668%2Fssr-181717?logo=github)](https://github.com/Yangdongle668/ssr)
+
 ShadowsocksR 服务端的 Docker 化一键部署方案，自动生成 SSR 链接 + Clash 配置文件，支持 BBR Plus 内核加速，全 Linux 发行版兼容。
+
+> **仓库地址**：https://github.com/Yangdongle668/ssr
+
+## 60 秒上手
+
+```bash
+# 1. SSH 登录你的 VPS（root 或可 sudo 用户）
+ssh root@你的服务器IP
+
+# 2. 克隆仓库
+git clone https://github.com/Yangdongle668/ssr.git
+cd ssr
+
+# 3. 一键部署
+sudo bash deploy.sh
+```
+
+部署完成后会自动显示 SSR 链接 + 二维码 + Clash 配置下载命令。
 
 ## 特性
 
@@ -53,10 +73,25 @@ ShadowsocksR 服务端的 Docker 化一键部署方案，自动生成 SSR 链接
 # 用 SSH 登录你的 VPS
 ssh root@你的服务器IP
 
-# 拉取本仓库
-git clone <你的仓库地址> ssr
+# 拉取本仓库（HTTPS，无需配置 SSH key）
+git clone https://github.com/Yangdongle668/ssr.git
 cd ssr
+
+# 或者用 SSH（需要先在 GitHub 配置 SSH key）
+# git clone git@github.com:Yangdongle668/ssr.git
+# cd ssr
 ```
+
+> 如果服务器在国内访问 GitHub 慢，可以用代理或镜像：
+> ```bash
+> # 使用 ghproxy 镜像
+> git clone https://ghproxy.com/https://github.com/Yangdongle668/ssr.git
+>
+> # 或先在本地下载 zip 再用 scp 上传
+> # 在本地：从 https://github.com/Yangdongle668/ssr/archive/refs/heads/main.zip 下载
+> # scp ssr-main.zip root@你的服务器IP:/root/
+> # 在服务器：unzip ssr-main.zip && mv ssr-main ssr && cd ssr
+> ```
 
 ## 第 3 步：一键部署
 
@@ -586,6 +621,12 @@ ssr/
 | `sysctl net.ipv4.tcp_congestion_control` | 查 BBR 状态 |
 
 ---
+
+# 反馈与贡献
+
+- 仓库：https://github.com/Yangdongle668/ssr
+- 提 Issue：https://github.com/Yangdongle668/ssr/issues
+- 提 PR：欢迎修复 bug / 增加新发行版兼容性 / 优化分流规则
 
 # License
 
