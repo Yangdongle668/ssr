@@ -24,12 +24,13 @@ sudo bash deploy.sh
 
 ## 特性
 
-- ✅ **一键部署**：单条命令完成 Docker 安装 + 内核优化 + SSR 启动
-- ✅ **双格式输出**：同时生成 SSR 链接（含二维码）+ Clash YAML 配置文件
+- ✅ **一键部署**：单条命令完成 Docker 安装 + 内核优化 + SSR 启动 + Clash HTTP 下载服务
+- ✅ **双客户端支持**：同时生成 SSR 链接（含二维码）+ Clash YAML 配置
+- ✅ **Clash URL 下载**：内置轻量 nginx 容器，提供 Clash 客户端 "Download from URL" 用的 URL（token 路径保护）
 - ✅ **隐蔽性强的协议组合**：`auth_chain_a` + `tls1.2_ticket_auth`（伪装域名 `cloud.tencent.com`）
 - ✅ **BBR Plus 内核加速**：基于 `UJX6N/bbrplus-5.15`，自动适配 Debian/Ubuntu/CentOS/RHEL
 - ✅ **配置可改**：单条命令修改端口、密码、伪装域名、备注
-- ✅ **一键查询**：随时查看接入点信息、SSR 链接、Clash 文件下载命令
+- ✅ **一键查询**：随时查看接入点信息、SSR 链接、Clash 下载 URL
 - ✅ **全 Linux VPS 兼容**：自动检测发行版与虚拟化类型，OpenVZ/LXC 自动降级
 - ✅ **完整中国分流规则**：Clash 配置内置国内直连 + 国外代理 + 广告拦截
 
@@ -63,7 +64,9 @@ sudo bash deploy.sh
 
 ### 1.2 网络要求
 - 服务器在国外（一般是港日韩美新加坡）
-- 端口 `17777` 在 VPS 商面板的"安全组/防火墙"里放行（TCP + UDP）
+- 在 VPS 商面板的"安全组/防火墙"里放行：
+  - **`17777`** TCP + UDP（SSR 服务）
+  - **`18888`** TCP（Clash 配置文件下载 URL；不用 URL 可不开）
 
 > 部署脚本会自动配置服务器系统层防火墙（iptables/ufw/firewalld），但 **VPS 商家的外部安全组规则必须由你手动配置**。
 
@@ -102,15 +105,16 @@ sudo bash deploy.sh
 部署脚本会依次执行：
 
 ```
-[1/9] 加载配置（生成 .env）
-[2/9] 安装系统依赖（curl / qrencode 等）
-[3/9] 安装 / 启动 Docker
-[4/9] 网络参数调优（TCP fastopen / 缓冲区 / MTU 探测）
-[5/9] 配置 BBR / BBR Plus 加速
-[6/9] 配置防火墙（自动放行 17777 端口）
-[7/9] 同步 SSR 配置 + 启动 Docker 容器
-[8/9] 生成 Clash YAML
-[9/9] 输出接入点信息（SSR 链接 + 二维码 + Clash 下载命令）
+[1/10]  加载配置（生成 .env）
+[2/10]  安装系统依赖（curl / qrencode 等）
+[3/10]  安装 / 启动 Docker
+[4/10]  网络参数调优（TCP fastopen / 缓冲区 / MTU 探测）
+[5/10]  配置 BBR / BBR Plus 加速
+[6/10]  生成 Clash 下载 token（首次部署生成 32 字符随机串，后续保持不变）
+[7/10]  配置防火墙（自动放行 17777 + 18888 端口）
+[8/10]  同步 SSR 配置 + 生成 Clash YAML
+[9/10]  启动 Docker 容器（SSR + Clash HTTP 下载服务）
+[10/10] 输出接入点信息（SSR 链接 + Clash 下载 URL + 二维码）
 ```
 
 **预计耗时**：3-5 分钟（不算 BBR Plus 内核安装；如装内核需 5-10 分钟，且需要重启）
@@ -133,17 +137,19 @@ sudo bash deploy.sh
   [终端二维码 ASCII 图案]
   ✓ 二维码 PNG: ./ssr-qrcode.png
 
-═══════════ Clash 配置文件下载 ═══════════
-  本地路径    /root/ssr/clash.yaml
-  文件大小    7.2K
+═══════════ Clash 配置文件 - 下载方式 ═══════════
 
-  从本机下载到客户端电脑（在客户端运行）：
+  方式 1：URL 下载（推荐，对应 Clash 的 "Download from URL"）
 
-  # Linux / macOS：
-  scp root@1.2.3.4:/root/ssr/clash.yaml ./clash.yaml
+    http://1.2.3.4:18888/aBcD1234...xyz/clash.yaml
+    [URL 二维码 ASCII 图案]
+    ✓ Clash HTTP 服务运行中
 
-  # Windows (PowerShell)：
-  scp root@1.2.3.4:/root/ssr/clash.yaml clash.yaml
+  方式 2：SCP 下载到本地电脑
+    scp root@1.2.3.4:/root/ssr/clash.yaml ./clash.yaml
+
+  方式 3：在服务器终端 cat 复制全部内容
+    cat /root/ssr/clash.yaml
 ```
 
 ## 第 4 步：把配置导入到客户端
@@ -176,43 +182,137 @@ Clash 支持精细分流（国内直连 / 国外代理 / 广告拦截）。
 | iOS | Stash、Shadowrocket（外区 Apple ID）|
 | Linux | Clash Verge |
 
-**步骤**：
+部署脚本会启动一个轻量 nginx 容器，提供一个 **HTTP 下载 URL**，对应 Clash 客户端的 **"Download from URL"** 功能：
 
-#### Step 1：从服务器把 `clash.yaml` 下载到本地
+```
+http://你的服务器IP:18888/<32位随机token>/clash.yaml
+```
 
-在你的**电脑（不是服务器）**上打开终端（Windows 用 PowerShell），运行部署完成时显示的 `scp` 命令：
+> URL 里的 token 在部署时随机生成，写到 `.env`，每次重新部署/修改保持不变。
+> 想换 URL 把 `.env` 里 `CLASH_HTTP_TOKEN=` 这一行清空再跑 `sudo bash deploy.sh` 即可。
+
+#### 方式 1：URL 直接导入（推荐）
+
+##### Clash Verge
+1. 打开 Clash Verge
+2. 左侧 "Profiles / 配置"
+3. 顶部输入框粘贴 URL → 点 "Download" 按钮
+4. 等下载完成 → 点新出现的配置卡片"使用"
+5. 顶部开关打开"系统代理 / TUN 模式"
+
+##### Clash for Windows
+1. 打开 CFW
+2. "Profiles" 标签
+3. 顶部 URL 输入框粘贴 → 点 "Download"
+4. 点配置使其变蓝
+5. "General" 标签 → 打开 "System Proxy"
+
+##### Clash for Android / 小猫咪
+1. 打开应用 → 配置 / Profiles
+2. 点"+"号 → 选 "URL"
+3. 粘贴 URL（或扫描部署时显示的 URL 二维码）
+4. 等下载完成 → 选中
+5. 主界面打开开关
+
+##### ClashX Pro (macOS)
+1. 菜单栏图标 → "Config" → "Remote Config"
+2. "Manage Configs" → "+"
+3. URL 粘贴 → "OK"
+4. 选中下载的配置 → 启用代理
+
+#### 方式 2：先下载到本地再导入
+
+如果你的客户端在国内、连不上服务器的 18888 端口，或者你不想暴露这个 HTTP 端口，可以走 SCP：
 
 ```bash
-# 把 1.2.3.4 换成你的服务器 IP
+# 在你的客户端电脑（不是服务器）上执行
+# 把 1.2.3.4 换成你的服务器 IP，路径用部署完成时显示的实际路径
 scp root@1.2.3.4:/root/ssr/clash.yaml ./clash.yaml
 ```
 
-输入 SSH 密码后，会下载 `clash.yaml` 到当前目录。
+> Windows 用户：Win10+ 自带 `scp`，PowerShell 里直接用即可；图形化可以用 [WinSCP](https://winscp.net/)。
 
-> Windows 用户如果没有 `scp`，可以用 [WinSCP](https://winscp.net/) 图形界面拖拽，或在 PowerShell 里直接用（Win10+ 自带）
+下载完成后，在 Clash 客户端选 "导入文件" / "Local File" 选这个 `clash.yaml`。
 
-#### Step 2：在 Clash 客户端导入
+#### 方式 3：复制粘贴
 
-以 **Clash Verge** 为例：
-1. 打开 Clash Verge
-2. 左侧"配置/Profiles"
-3. 点"+"号 → "本地文件"
-4. 选刚下载的 `clash.yaml`
-5. 点新出现的配置卡片"使用"
-6. 顶部开关打开"系统代理 / TUN 模式"
+```bash
+# 在服务器终端
+cat /root/ssr/clash.yaml
+```
 
-以 **Clash for Windows** 为例：
-1. 打开 CFW
-2. "Profiles" 标签
-3. 点"+"号 → 选 `clash.yaml` → "Open"
-4. 点配置使其变蓝
-5. "General" 标签 → 打开"System Proxy"
+复制全部输出，在 Clash 客户端 "From Clipboard" / "从剪贴板导入"（部分客户端不支持此项，建议用方式 1 或 2）。
 
-**导入后**：
-- 默认走"🚀 节点选择"组（节点选择 → 自动选择 → 你的 SSR 节点）
+#### 导入后的效果
+
+- 默认走 "🚀 节点选择" 组（节点选择 → 自动选择 → 你的 SSR 节点）
 - 国内域名 / IP 自动直连
 - 国外域名走代理
 - 广告域名被拦截
+- 7 个预定义策略组：节点选择 / 自动选择 / 国外媒体 / 电报消息 / 苹果服务 / 广告拦截 / 漏网之鱼
+
+---
+
+# 服务器重启后会自动恢复
+
+部署脚本配置了**两层自启机制**，服务器重启后无需任何手动操作，SSR 和 Clash HTTP 服务都会自动恢复：
+
+| 层级 | 机制 | 部署时已自动配置 |
+|---|---|---|
+| **L1 系统层** | `systemctl enable docker` 让 Docker daemon 开机自启 | ✅ |
+| **L2 容器层** | `restart: unless-stopped` 让容器跟随 Docker daemon 自动启动 | ✅ |
+
+`unless-stopped` 策略意味着：
+- ✅ 服务器重启 → 容器自动启动
+- ✅ Docker daemon 重启 → 容器自动启动
+- ✅ 容器进程崩溃 → Docker 自动重启容器
+- ❌ 你手动 `docker stop` 之后重启服务器 → 不会自动启动（这是设计上的"尊重用户意愿"）
+
+## 验证自启配置
+
+随时跑：
+
+```bash
+bash info.sh
+```
+
+留意输出里的"运行状态"区块：
+
+```
+═══════════ 运行状态 ═══════════
+  SSR 容器       running (健康: healthy, 重启策略: unless-stopped)
+  Clash HTTP     running (健康: healthy, 重启策略: unless-stopped)
+  Docker 自启    已启用 (服务器重启后自动启动)
+```
+
+只要这三行都正常，服务器重启就能自动恢复。
+
+## 真实测试（可选）
+
+```bash
+# 在服务器上执行
+sudo reboot
+
+# 等 1-2 分钟后重新 SSH 登录
+ssh root@你的服务器IP
+
+# 验证
+docker compose ps           # 应该看到 ssr-server 和 ssr-clash-http 都在 running
+ss -lntu | grep 17777       # 应该看到 SSR 端口在监听
+```
+
+## 如果不想自动启动（极少情况）
+
+```bash
+# 暂停容器（重启后不会自动启动，因为 unless-stopped 尊重显式 stop）
+docker compose stop
+
+# 完全禁用容器自启（保留 Docker daemon 自启）
+docker update --restart=no ssr-server ssr-clash-http
+
+# 也禁用 Docker daemon 自启
+sudo systemctl disable docker
+```
 
 ---
 
@@ -484,6 +584,34 @@ sudo reboot
 sysctl net.ipv4.tcp_congestion_control
 ```
 
+## Clash 客户端 "Download from URL" 失败
+
+```bash
+# 1. 确认 Clash HTTP 容器在跑
+docker compose ps
+# 应该看到 ssr-clash-http 状态为 running
+
+# 没看到？启动它：
+docker compose --profile clash-http up -d
+
+# 2. 在服务器上自测 URL
+curl -I "http://127.0.0.1:18888/$(grep ^CLASH_HTTP_TOKEN= .env | cut -d= -f2)/clash.yaml"
+# 应该返回 HTTP/1.1 200 OK
+
+# 3. 在客户端电脑测连通
+curl -I "http://你的服务器IP:18888/<token>/clash.yaml"
+# 失败 → 检查 VPS 商家面板的安全组是否开了 18888
+
+# 4. 服务器系统防火墙
+iptables -L -n | grep 18888       # 或
+ufw status | grep 18888           # 或
+firewall-cmd --list-ports | grep 18888
+
+# 5. 如果想换 token（URL）
+sed -i 's/^CLASH_HTTP_TOKEN=.*/CLASH_HTTP_TOKEN=/' .env
+sudo bash deploy.sh
+```
+
 ## Docker 拉镜像失败（国内 VPS）
 
 国内 VPS 可能无法访问 Docker Hub，编辑 `/etc/docker/daemon.json` 加镜像加速：
@@ -569,9 +697,24 @@ bash scripts/generate-clash.sh  # 重新生成 clash.yaml
 
 4. **保密 clash.yaml**：里面包含完整密码和服务器信息，传输 / 存储要走加密通道（SCP / 加密硬盘）
 
-5. **流量提醒**：`auth_chain_a + tls1.2_ticket_auth` 隐蔽性好，但 GFW 在持续升级主动探测，**没有协议是 100% 安全的**。如果连续被封，及时换端口和伪装域名
+5. **Clash 下载 URL 的安全说明**：
+   - URL 是 **HTTP（无 TLS）**，因为没有域名。32 字符随机 token 防止扫描器爬到，但**不防中间人监听**
+   - 建议只在可信网络下首次导入（家里 / 4G / 公司 VPN），导入后客户端会本地缓存配置
+   - URL 泄露后，攻击者就能拿到你的 SSR 完整密码 → 立即跑 `sudo bash modify.sh --password 新密码 --port 新端口`，再清空 `.env` 里 `CLASH_HTTP_TOKEN=` 重新部署生成新 URL
+   - 进阶：把 18888 端口套到 Cloudflare 后面（免费 + 自动 HTTPS + 隐藏源 IP）
+   - 完全不想暴露：`.env` 里 `ENABLE_CLASH_HTTP=false`，重新部署，只用 SCP 方式
 
-6. **法律提醒**：请遵守服务器所在地和你所在地的法律法规
+6. **轮换 Clash 下载 URL**（建议每 3-6 个月做一次）：
+   ```bash
+   # 编辑 .env
+   sed -i 's/^CLASH_HTTP_TOKEN=.*/CLASH_HTTP_TOKEN=/' .env
+   # 重新部署（会自动生成新 token）
+   sudo bash deploy.sh
+   ```
+
+7. **流量提醒**：`auth_chain_a + tls1.2_ticket_auth` 隐蔽性好，但 GFW 在持续升级主动探测，**没有协议是 100% 安全的**。如果连续被封，及时换端口和伪装域名
+
+8. **法律提醒**：请遵守服务器所在地和你所在地的法律法规
 
 ---
 
@@ -582,9 +725,10 @@ ssr/
 ├── deploy.sh                # 一键部署主入口（root 执行）
 ├── info.sh                  # 一键查询接入点信息
 ├── modify.sh                # 修改端口 / 密码 / 伪装域名 / 备注
-├── docker-compose.yml       # Docker 编排
-├── Dockerfile               # 自定义镜像（基于 teddysun/shadowsocks-r）
-├── .env                     # 实际配置（git 忽略）
+├── docker-compose.yml       # Docker 编排（SSR + Clash HTTP 下载服务）
+├── Dockerfile               # 自定义 SSR 镜像（基于 teddysun/shadowsocks-r）
+├── nginx-clash.conf         # Clash HTTP 下载服务的 nginx 配置（token 路径保护）
+├── .env                     # 实际配置（git 忽略，含密码 + token）
 ├── .env.example             # 配置模板
 ├── .gitignore
 ├── README.md                # 本文档
@@ -594,11 +738,13 @@ ssr/
 │   ├── detect-os.sh         # OS / 虚拟化 / 内核检测
 │   ├── install-bbr-plus.sh  # BBR Plus 内核安装
 │   ├── tune-sysctl.sh       # sysctl 网络调优
-│   ├── generate-clash.sh    # 生成 Clash YAML
-│   └── healthcheck.sh       # Docker 健康检查
+│   ├── generate-clash.sh    # 生成 Clash YAML（同时复制到 share/<token>/）
+│   └── healthcheck.sh       # SSR 容器健康检查
+├── share/<token>/clash.yaml # Clash HTTP 下载根目录（git 忽略）
 ├── clash.yaml               # Clash 配置（生成产物，git 忽略）
 ├── ssr-info.txt             # 节点摘要（生成产物，git 忽略）
-└── ssr-qrcode.png           # SSR 二维码（生成产物，git 忽略）
+├── ssr-qrcode.png           # SSR 链接二维码（生成产物，git 忽略）
+└── clash-url-qrcode.png     # Clash 下载 URL 二维码（生成产物，git 忽略）
 ```
 
 ---
@@ -608,17 +754,21 @@ ssr/
 | 命令 | 用途 |
 |---|---|
 | `sudo bash deploy.sh` | 首次部署（或重新部署） |
-| `bash info.sh` | 查看接入点信息（不需要 root） |
+| `bash info.sh` | 查看接入点信息 + Clash URL（不需要 root） |
 | `sudo bash modify.sh` | 交互式修改配置 |
-| `sudo bash modify.sh --port 18888` | 直接改端口 |
+| `sudo bash modify.sh --port 18888` | 直接改 SSR 端口 |
 | `sudo bash modify.sh --password 'xxx'` | 直接改密码 |
 | `sudo bash modify.sh --reset` | 重置默认值 |
 | `sudo bash modify.sh --help` | 修改命令的完整帮助 |
-| `docker compose ps` | 查看容器状态 |
-| `docker compose logs -f ssr` | 实时日志 |
-| `docker compose restart` | 重启容器 |
+| `docker compose ps` | 查看两个容器状态（ssr-server / ssr-clash-http） |
+| `docker compose logs -f ssr` | SSR 实时日志 |
+| `docker compose logs -f clash-http` | Clash HTTP 服务实时日志 |
+| `docker compose restart` | 重启所有容器 |
+| `docker compose --profile clash-http up -d` | 单独启动 Clash HTTP 服务 |
 | `bash scripts/generate-clash.sh` | 仅重新生成 clash.yaml |
 | `sysctl net.ipv4.tcp_congestion_control` | 查 BBR 状态 |
+| `grep ^CLASH_HTTP_TOKEN= .env` | 查看当前 Clash 下载 URL 的 token |
+| `sed -i 's/^CLASH_HTTP_TOKEN=.*/CLASH_HTTP_TOKEN=/' .env && sudo bash deploy.sh` | 重置 Clash 下载 URL（生成新 token） |
 
 ---
 

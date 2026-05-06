@@ -32,6 +32,40 @@ load_env() {
     set +a
 }
 
+# ===== 生成/读取 Clash HTTP token =====
+ensure_clash_token() {
+    if [[ "${ENABLE_CLASH_HTTP:-true}" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -z "${CLASH_HTTP_TOKEN:-}" ]]; then
+        # 32 位 URL-safe 随机串
+        local tk
+        if command -v openssl >/dev/null 2>&1; then
+            tk=$(openssl rand -hex 16)
+        else
+            tk=$(tr -dc 'a-zA-Z0-9' </dev/urandom 2>/dev/null | head -c 32 || echo "")
+            [[ -z "${tk}" ]] && tk=$(date +%s%N | sha256sum | cut -c1-32)
+        fi
+
+        # 写回 .env
+        if grep -qE "^CLASH_HTTP_TOKEN=" .env; then
+            sed -i "s|^CLASH_HTTP_TOKEN=.*|CLASH_HTTP_TOKEN=${tk}|" .env
+        else
+            echo "CLASH_HTTP_TOKEN=${tk}" >> .env
+        fi
+
+        export CLASH_HTTP_TOKEN="${tk}"
+        log_info "已生成 Clash 下载 URL token: ${tk:0:8}...${tk: -4}"
+    else
+        log_info "复用已有 Clash token: ${CLASH_HTTP_TOKEN:0:8}...${CLASH_HTTP_TOKEN: -4}"
+    fi
+
+    # 创建 share 目录（存放 token 子目录）
+    mkdir -p "${SCRIPT_DIR}/share/${CLASH_HTTP_TOKEN}"
+    chmod 755 "${SCRIPT_DIR}/share" "${SCRIPT_DIR}/share/${CLASH_HTTP_TOKEN}"
+}
+
 # ===== 前置检查 =====
 check_root() {
     if [[ ${EUID} -ne 0 ]]; then
@@ -61,12 +95,37 @@ install_docker() {
         fi
     fi
 
-    # 启动 Docker
+    # 配置 Docker 开机自启 + 启动
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable docker >/dev/null 2>&1 || true
+        # systemd 系统：明确 enable + start
+        systemctl enable docker.service >/dev/null 2>&1 || true
+        systemctl enable containerd.service >/dev/null 2>&1 || true
         systemctl start docker >/dev/null 2>&1 || true
-    elif command -v service >/dev/null 2>&1; then
+
+        # 验证 enable 成功（关键，保证服务器重启后 docker 会自动起来）
+        if systemctl is-enabled docker >/dev/null 2>&1; then
+            log_info "✓ Docker daemon 已设置开机自启 (systemctl is-enabled docker)"
+        else
+            log_warn "Docker daemon 开机自启设置失败，重启后需要手动启动"
+            log_warn "  尝试手动执行：sudo systemctl enable --now docker"
+        fi
+    elif command -v rc-update >/dev/null 2>&1; then
+        # OpenRC（Alpine）
+        rc-update add docker default >/dev/null 2>&1 || true
+        rc-service docker start >/dev/null 2>&1 || true
+        log_info "✓ Docker 已加入 OpenRC default runlevel"
+    elif command -v chkconfig >/dev/null 2>&1; then
+        # 老式 sysvinit
+        chkconfig docker on >/dev/null 2>&1 || true
         service docker start >/dev/null 2>&1 || true
+        log_info "✓ Docker 已通过 chkconfig 设置开机自启"
+    elif command -v update-rc.d >/dev/null 2>&1; then
+        update-rc.d docker defaults >/dev/null 2>&1 || true
+        service docker start >/dev/null 2>&1 || true
+        log_info "✓ Docker 已通过 update-rc.d 设置开机自启"
+    else
+        service docker start >/dev/null 2>&1 || true
+        log_warn "未识别的 init 系统，无法自动配置 Docker 开机自启"
     fi
 
     # 验证 Docker 可用
@@ -184,21 +243,27 @@ configure_firewall() {
         log_warn "ENABLE_FIREWALL=false，跳过防火墙配置"
         return
     fi
-    local port="${SSR_PORT:-17777}"
-    log_info "开放防火墙端口 ${port}/tcp 与 ${port}/udp"
+    local ssr_port="${SSR_PORT:-17777}"
+    local http_port="${CLASH_HTTP_PORT:-18888}"
+    local need_http="false"
+    [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]] && need_http="true"
+
+    log_info "开放防火墙：SSR ${ssr_port}/tcp+udp $([[ ${need_http} == true ]] && echo \", Clash HTTP ${http_port}/tcp\" || true)"
 
     # ufw
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${port}/tcp" >/dev/null || true
-        ufw allow "${port}/udp" >/dev/null || true
+        ufw allow "${ssr_port}/tcp" >/dev/null || true
+        ufw allow "${ssr_port}/udp" >/dev/null || true
+        [[ "${need_http}" == "true" ]] && ufw allow "${http_port}/tcp" >/dev/null || true
         log_info "✓ ufw 规则已添加"
         return
     fi
 
     # firewalld
     if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null
-        firewall-cmd --permanent --add-port="${port}/udp" >/dev/null
+        firewall-cmd --permanent --add-port="${ssr_port}/tcp" >/dev/null
+        firewall-cmd --permanent --add-port="${ssr_port}/udp" >/dev/null
+        [[ "${need_http}" == "true" ]] && firewall-cmd --permanent --add-port="${http_port}/tcp" >/dev/null
         firewall-cmd --reload >/dev/null
         log_info "✓ firewalld 规则已添加"
         return
@@ -206,10 +271,14 @@ configure_firewall() {
 
     # iptables 直接
     if command -v iptables >/dev/null 2>&1; then
-        iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT 2>/dev/null \
-            || iptables -I INPUT -p tcp --dport "${port}" -j ACCEPT
-        iptables -C INPUT -p udp --dport "${port}" -j ACCEPT 2>/dev/null \
-            || iptables -I INPUT -p udp --dport "${port}" -j ACCEPT
+        iptables -C INPUT -p tcp --dport "${ssr_port}" -j ACCEPT 2>/dev/null \
+            || iptables -I INPUT -p tcp --dport "${ssr_port}" -j ACCEPT
+        iptables -C INPUT -p udp --dport "${ssr_port}" -j ACCEPT 2>/dev/null \
+            || iptables -I INPUT -p udp --dport "${ssr_port}" -j ACCEPT
+        if [[ "${need_http}" == "true" ]]; then
+            iptables -C INPUT -p tcp --dport "${http_port}" -j ACCEPT 2>/dev/null \
+                || iptables -I INPUT -p tcp --dport "${http_port}" -j ACCEPT
+        fi
 
         # 持久化（debian: iptables-persistent；rhel: iptables-services）
         if command -v netfilter-persistent >/dev/null 2>&1; then
@@ -260,31 +329,63 @@ EOF
 
 # ===== 启动容器 =====
 start_container() {
-    log_info "构建并启动 SSR 容器..."
-    ${DC} build --pull
-    ${DC} up -d
+    # 根据是否启用 clash-http 选择 profile
+    local profile_args=()
+    if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]]; then
+        profile_args=(--profile clash-http)
+    fi
 
-    # 等待健康检查
+    log_info "构建并启动容器..."
+    ${DC} "${profile_args[@]}" build --pull
+    ${DC} "${profile_args[@]}" up -d
+
+    # 等待容器启动
     log_info "等待容器启动..."
-    local i=0
-    while [[ ${i} -lt 30 ]]; do
-        if ${DC} ps --format json 2>/dev/null | grep -q '"State":"running"' \
-           || ${DC} ps 2>/dev/null | grep -qE "(Up|running)"; then
-            break
-        fi
-        sleep 1
-        i=$((i + 1))
-    done
+    sleep 3
 
-    # 验证端口
+    # 验证 SSR 端口
     local port="${SSR_PORT:-17777}"
-    sleep 2
     if command -v ss >/dev/null 2>&1; then
         if ss -lnt | grep -q ":${port} "; then
-            log_info "✓ 端口 ${port} 已监听"
+            log_info "✓ SSR 端口 ${port} 已监听"
         else
-            log_warn "端口 ${port} 未监听，请检查日志：${DC} logs"
+            log_warn "SSR 端口 ${port} 未监听，请检查日志：${DC} logs ssr"
         fi
+    fi
+
+    # 验证 Clash HTTP 端口
+    if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]]; then
+        local http_port="${CLASH_HTTP_PORT:-18888}"
+        if command -v ss >/dev/null 2>&1; then
+            if ss -lnt | grep -q ":${http_port} "; then
+                log_info "✓ Clash HTTP 端口 ${http_port} 已监听"
+            else
+                log_warn "Clash HTTP 端口 ${http_port} 未监听，请检查日志：${DC} logs clash-http"
+            fi
+        fi
+    fi
+
+    # 验证容器的开机自启 / 重启策略
+    log_info "─ 验证开机自启配置 ─"
+    local ssr_policy clash_policy
+    ssr_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' ssr-server 2>/dev/null || echo "unknown")
+    if [[ "${ssr_policy}" == "unless-stopped" ]] || [[ "${ssr_policy}" == "always" ]]; then
+        log_info "✓ SSR 容器重启策略: ${ssr_policy} (服务器重启后会自动启动)"
+    else
+        log_warn "SSR 容器重启策略异常: ${ssr_policy}"
+    fi
+
+    if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]]; then
+        clash_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' ssr-clash-http 2>/dev/null || echo "unknown")
+        if [[ "${clash_policy}" == "unless-stopped" ]] || [[ "${clash_policy}" == "always" ]]; then
+            log_info "✓ Clash HTTP 容器重启策略: ${clash_policy} (服务器重启后会自动启动)"
+        else
+            log_warn "Clash HTTP 容器重启策略异常: ${clash_policy}"
+        fi
+    fi
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled docker >/dev/null 2>&1; then
+        log_info "✓ Docker daemon 已设置开机自启，服务器重启后会自动启动 Docker + 容器"
     fi
 }
 
@@ -325,32 +426,36 @@ main() {
     check_root
     check_kernel_arch
 
-    log_step "1/9 加载配置"
+    log_step "1/10 加载配置"
     load_env
 
-    log_step "2/9 安装系统依赖"
+    log_step "2/10 安装系统依赖"
     install_deps
 
-    log_step "3/9 安装/启动 Docker"
+    log_step "3/10 安装/启动 Docker"
     install_docker
 
-    log_step "4/9 网络参数调优"
+    log_step "4/10 网络参数调优"
     bash "${SCRIPT_DIR}/scripts/tune-sysctl.sh" || log_warn "sysctl 调优失败，继续"
 
-    log_step "5/9 配置 BBR/BBR Plus 加速"
+    log_step "5/10 配置 BBR/BBR Plus 加速"
     bash "${SCRIPT_DIR}/scripts/install-bbr-plus.sh" || log_warn "BBR 配置失败，继续"
 
-    log_step "6/9 配置防火墙"
+    log_step "6/10 生成 Clash 下载 token"
+    ensure_clash_token
+    set -a; source .env; set +a   # 重新加载，让后续步骤拿到 CLASH_HTTP_TOKEN
+
+    log_step "7/10 配置防火墙"
     configure_firewall
 
-    log_step "7/9 同步 SSR 配置 + 启动容器"
+    log_step "8/10 同步 SSR 配置 + 生成 Clash YAML"
     sync_config
-    start_container
-
-    log_step "8/9 生成 Clash YAML"
     generate_clash_config
 
-    log_step "9/9 附加项 + 输出信息"
+    log_step "9/10 启动容器"
+    start_container
+
+    log_step "10/10 附加项 + 输出信息"
     install_fail2ban
     show_info
 }

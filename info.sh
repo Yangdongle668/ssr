@@ -66,6 +66,7 @@ detect_public_ip() {
 }
 
 container_status() {
+    local name="$1"
     if ! command -v docker >/dev/null 2>&1; then
         echo "Docker 未安装"
         return
@@ -75,15 +76,28 @@ container_status() {
         return
     fi
 
-    local cid status health
-    cid=$(docker ps -a --filter "name=^ssr-server$" --format "{{.ID}}" 2>/dev/null | head -1)
+    local cid status health policy
+    cid=$(docker ps -a --filter "name=^${name}$" --format "{{.ID}}" 2>/dev/null | head -1)
     if [[ -z "${cid}" ]]; then
         echo "未运行 (容器不存在)"
         return
     fi
     status=$(docker inspect -f '{{.State.Status}}' "${cid}" 2>/dev/null || echo "unknown")
     health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${cid}" 2>/dev/null || echo "n/a")
-    echo "${status} (健康: ${health})"
+    policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "${cid}" 2>/dev/null || echo "unknown")
+    echo "${status} (健康: ${health}, 重启策略: ${policy})"
+}
+
+docker_autostart_status() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "n/a (非 systemd)"
+        return
+    fi
+    if systemctl is-enabled docker >/dev/null 2>&1; then
+        echo "已启用 (服务器重启后自动启动)"
+    else
+        echo "未启用 (服务器重启后需手动: systemctl start docker)"
+    fi
 }
 
 bbr_status() {
@@ -177,29 +191,62 @@ EOF
     fi
 
     # ===== Clash 配置文件 =====
-    print_section "Clash 配置文件下载"
-    if [[ -f clash.yaml ]]; then
-        local size
-        size=$(du -h clash.yaml | cut -f1)
-        local abs_path
-        abs_path=$(readlink -f clash.yaml)
-        print_kv "本地路径" "${abs_path}"
-        print_kv "文件大小" "${size}"
-
-        echo
-        echo -e "  ${C_BLD}从本机下载到客户端电脑（在客户端运行）：${C_RST}"
-        echo
-        echo -e "  ${C_GRN}# Linux / macOS：${C_RST}"
-        echo "  scp root@${server}:${abs_path} ./clash.yaml"
-        echo
-        echo -e "  ${C_GRN}# Windows (PowerShell)：${C_RST}"
-        echo "  scp root@${server}:${abs_path} clash.yaml"
-        echo
-        echo -e "  ${C_GRN}# 也可以直接 cat 复制内容：${C_RST}"
-        echo "  cat ${abs_path}"
-    else
+    print_section "Clash 配置文件 - 下载方式"
+    if [[ ! -f clash.yaml ]]; then
         echo -e "  ${C_YLW}[!] clash.yaml 不存在，请先运行：${C_RST}"
         echo "      bash scripts/generate-clash.sh"
+    else
+        local size abs_path
+        size=$(du -h clash.yaml | cut -f1)
+        abs_path=$(readlink -f clash.yaml)
+
+        # ───── 方式 1: HTTP URL（推荐，配合 Clash 的 "Download from URL"）─────
+        local clash_url=""
+        if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]] && [[ -n "${CLASH_HTTP_TOKEN:-}" ]]; then
+            local http_port="${CLASH_HTTP_PORT:-18888}"
+            clash_url="http://${server}:${http_port}/${CLASH_HTTP_TOKEN}/clash.yaml"
+
+            echo
+            echo -e "  ${C_BLD}${C_GRN}方式 1：URL 下载（推荐，对应 Clash 的 \"Download from URL\"）${C_RST}"
+            echo
+            echo -e "    ${C_CYN}${clash_url}${C_RST}"
+            echo
+
+            # URL 二维码（手机端方便）
+            if [[ "${ENABLE_QRCODE:-true}" == "true" ]] && command -v qrencode >/dev/null 2>&1; then
+                echo -e "    ${C_DIM}手机扫码（粘贴到 Clash for Android / 小猫咪）：${C_RST}"
+                qrencode -t ansiutf8 -o - "${clash_url}" | sed 's/^/    /'
+                qrencode -t PNG -s 6 -o "./clash-url-qrcode.png" "${clash_url}" 2>/dev/null && \
+                    echo -e "    ${C_GRN}✓ URL 二维码 PNG: ./clash-url-qrcode.png${C_RST}"
+            fi
+
+            # 检测 nginx 容器是否在跑
+            if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+                if docker ps --filter "name=^ssr-clash-http$" --format "{{.Names}}" 2>/dev/null | grep -q "ssr-clash-http"; then
+                    echo -e "    ${C_GRN}✓ Clash HTTP 服务运行中${C_RST}"
+                else
+                    echo -e "    ${C_YLW}⚠ Clash HTTP 服务未运行，URL 不可访问${C_RST}"
+                    echo -e "    ${C_YLW}  启动：docker compose --profile clash-http up -d${C_RST}"
+                fi
+            fi
+        else
+            echo
+            echo -e "  ${C_YLW}方式 1：URL 下载 (已禁用)${C_RST}"
+            echo -e "  ${C_DIM}  在 .env 设置 ENABLE_CLASH_HTTP=true 并重新部署${C_RST}"
+        fi
+
+        # ───── 方式 2: SCP 下载 ─────
+        echo
+        echo -e "  ${C_BLD}方式 2：SCP 下载到本地电脑${C_RST}"
+        echo -e "    ${C_DIM}本地路径: ${abs_path} (${size})${C_RST}"
+        echo
+        echo -e "    ${C_GRN}# Linux / macOS / Windows PowerShell：${C_RST}"
+        echo "    scp root@${server}:${abs_path} ./clash.yaml"
+
+        # ───── 方式 3: 直接复制 ─────
+        echo
+        echo -e "  ${C_BLD}方式 3：在服务器终端 cat 复制全部内容${C_RST}"
+        echo "    cat ${abs_path}"
     fi
 
     # ===== 配置文件位置（其它）=====
@@ -211,13 +258,25 @@ EOF
 
     # ===== 服务状态 =====
     print_section "运行状态"
-    print_kv "SSR 容器" "$(container_status)"
+    print_kv "SSR 容器" "$(container_status ssr-server)"
+    if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]]; then
+        print_kv "Clash HTTP" "$(container_status ssr-clash-http)"
+    fi
+    print_kv "Docker 自启" "$(docker_autostart_status)"
     print_kv "BBR 状态" "$(bbr_status)"
     if command -v ss >/dev/null 2>&1; then
         if ss -lnt 2>/dev/null | grep -q ":${port} "; then
-            print_kv "端口 ${port}" "${C_GRN}已监听${C_RST}"
+            print_kv "SSR 端口 ${port}" "${C_GRN}已监听${C_RST}"
         else
-            print_kv "端口 ${port}" "${C_RED}未监听${C_RST}"
+            print_kv "SSR 端口 ${port}" "${C_RED}未监听${C_RST}"
+        fi
+        if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]]; then
+            local hp="${CLASH_HTTP_PORT:-18888}"
+            if ss -lnt 2>/dev/null | grep -q ":${hp} "; then
+                print_kv "HTTP 端口 ${hp}" "${C_GRN}已监听${C_RST}"
+            else
+                print_kv "HTTP 端口 ${hp}" "${C_RED}未监听${C_RST}"
+            fi
         fi
     fi
 
@@ -230,10 +289,10 @@ EOF
     ${C_GRN}方式2：${C_RST} 用客户端"扫描二维码"功能扫上面的终端二维码
 
   ${C_BLD}Clash 客户端${C_RST} (Clash for Windows/ClashX/Clash Verge/小猫咪):
-    ${C_GRN}方式1：${C_RST} 用上面的 scp 命令把 clash.yaml 下载到本地
-            然后在客户端 "Profiles/配置" 里 "导入文件"
-    ${C_GRN}方式2：${C_RST} 在终端 \`cat clash.yaml\` 复制全部内容
-            客户端选 "导入" → "从剪贴板"（部分客户端不支持）
+    ${C_GRN}方式1（推荐）：${C_RST} 复制上面的 URL，客户端 "Profiles/配置" → "Download"
+            在 URL 输入框粘贴，确认即可（手机端用 URL 二维码扫码）
+    ${C_GRN}方式2：${C_RST} 用 scp 把 clash.yaml 下载到本地，客户端 "导入文件"
+    ${C_GRN}方式3：${C_RST} 在终端 \`cat clash.yaml\` 复制全部内容到客户端
 
   ${C_BLD}修改配置（端口/密码等）${C_RST}:
     ${C_GRN}sudo bash modify.sh${C_RST}              # 交互式修改
@@ -259,8 +318,12 @@ EOF
         echo
         echo "═══════════ Clash 配置文件 ═══════════"
         if [[ -f clash.yaml ]]; then
-            echo "本地路径: $(readlink -f clash.yaml)"
-            echo "下载命令: scp root@${server}:$(readlink -f clash.yaml) ./clash.yaml"
+            if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]] && [[ -n "${CLASH_HTTP_TOKEN:-}" ]]; then
+                local hp="${CLASH_HTTP_PORT:-18888}"
+                echo "URL (推荐):  http://${server}:${hp}/${CLASH_HTTP_TOKEN}/clash.yaml"
+            fi
+            echo "本地路径:    $(readlink -f clash.yaml)"
+            echo "SCP 下载:    scp root@${server}:$(readlink -f clash.yaml) ./clash.yaml"
         else
             echo "未生成（运行 bash scripts/generate-clash.sh）"
         fi

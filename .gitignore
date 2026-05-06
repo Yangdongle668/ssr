@@ -4,7 +4,9 @@
 # 部署产物（含密码，禁止提交）
 ssr-info.txt
 ssr-qrcode.png
+clash-url-qrcode.png
 clash.yaml
+share/
 logs/
 
 # 编辑器/系统

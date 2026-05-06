@@ -296,6 +296,17 @@ main() {
     log_info "✓ 已生成: ${out_file}"
     log_info "  节点: ${remark} (${server}:${port})"
     log_info "  规则: 国内直连 / 国外走代理 / 广告拦截"
+
+    # 同步到 HTTP 下载目录（nginx 容器读这里）
+    if [[ "${ENABLE_CLASH_HTTP:-true}" == "true" ]] && [[ -n "${CLASH_HTTP_TOKEN:-}" ]]; then
+        local share_dir="${PROJECT_DIR}/share/${CLASH_HTTP_TOKEN}"
+        mkdir -p "${share_dir}"
+        cp "${out_file}" "${share_dir}/clash.yaml"
+        chmod 644 "${share_dir}/clash.yaml"   # nginx 容器内 nobody 用户要能读
+        chmod 755 "${share_dir}"
+        chmod 755 "${PROJECT_DIR}/share"
+        log_info "✓ 已同步到下载目录: share/${CLASH_HTTP_TOKEN}/clash.yaml"
+    fi
 }
 
 main "$@"

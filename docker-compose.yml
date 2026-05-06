@@ -25,3 +25,27 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # Clash 配置文件下载服务（HTTP 静态文件，token 路径保护）
+  # 关闭：在 .env 设置 ENABLE_CLASH_HTTP=false，然后 docker compose up -d
+  clash-http:
+    image: nginx:alpine
+    container_name: ssr-clash-http
+    restart: unless-stopped
+    profiles:
+      - clash-http
+    ports:
+      - "${CLASH_HTTP_PORT:-18888}:80"
+    volumes:
+      - ./share:/usr/share/nginx/html:ro
+      - ./nginx-clash.conf:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/__health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
