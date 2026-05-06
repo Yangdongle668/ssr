@@ -1,0 +1,27 @@
+services:
+  ssr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ssr-server:latest
+    container_name: ssr-server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config/config.json:/etc/shadowsocks-r/config.json:ro
+      - ./logs:/var/log/shadowsocks-r
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.core.somaxconn=4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
