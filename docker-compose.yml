@@ -12,8 +12,8 @@ services:
       - ./logs:/var/log/shadowsocks-r
     cap_add:
       - NET_ADMIN
-    sysctls:
-      - net.core.somaxconn=4096
+    # 注意：network_mode: host 下不能设置网络类 sysctls（如 net.core.*）
+    # 这些参数已经由宿主机 scripts/tune-sysctl.sh 设置（值更大、覆盖更全）
     logging:
       driver: json-file
       options:
