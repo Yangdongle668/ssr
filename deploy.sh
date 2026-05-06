@@ -88,7 +88,12 @@ install_docker() {
     if command -v docker >/dev/null 2>&1; then
         log_info "Docker 已安装：$(docker --version)"
     else
-        log_info "正在安装 Docker（使用官方 get.docker.com 脚本）..."
+        log_info "正在安装 Docker（使用官方 get.docker.com 脚本，可能需要 2-5 分钟）..."
+        # 防 apt 交互式提示卡住
+        export DEBIAN_FRONTEND=noninteractive
+        export NEEDRESTART_MODE=a
+        export NEEDRESTART_SUSPEND=1
+        export APT_LISTCHANGES_FRONTEND=none
         if ! curl -fsSL https://get.docker.com | sh; then
             log_err "Docker 安装失败"
             exit 1
@@ -146,8 +151,11 @@ install_docker() {
         run_detection
         case "${OS_FAMILY}" in
             debian)
-                apt-get update -qq
-                apt-get install -y docker-compose-plugin || apt-get install -y docker-compose
+                export DEBIAN_FRONTEND=noninteractive
+                export NEEDRESTART_MODE=a
+                export NEEDRESTART_SUSPEND=1
+                apt-get install -y docker-compose-plugin \
+                    || apt-get install -y docker-compose
                 ;;
             rhel)
                 ${PKG_MGR} install -y docker-compose-plugin || ${PKG_MGR} install -y docker-compose
@@ -179,12 +187,25 @@ install_deps() {
     [[ "${ENABLE_QRCODE:-true}" == "true" ]] && pkgs+=(qrencode)
 
     log_info "安装依赖: ${pkgs[*]}"
+    log_info "（首次执行可能需要 1-2 分钟，请耐心等待 apt 输出）"
 
     case "${OS_FAMILY}" in
         debian)
+            # 全套防交互环境变量：DEBIAN_FRONTEND 防 dpkg 提示，
+            # NEEDRESTART_MODE=a 防 Ubuntu 22.04+ 的 needrestart 弹窗
             export DEBIAN_FRONTEND=noninteractive
-            apt-get update -qq
-            apt-get install -y "${pkgs[@]}"
+            export NEEDRESTART_MODE=a
+            export NEEDRESTART_SUSPEND=1
+            export APT_LISTCHANGES_FRONTEND=none
+
+            log_info "→ apt-get update (拉取软件源索引)"
+            apt-get update -y || log_warn "apt-get update 失败但继续"
+
+            log_info "→ apt-get install ${pkgs[*]}"
+            apt-get install -y --no-install-recommends \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold" \
+                "${pkgs[@]}"
             ;;
         rhel)
             ${PKG_MGR} install -y epel-release 2>/dev/null || true
@@ -306,7 +327,11 @@ install_fail2ban() {
 
     log_info "安装 fail2ban（保护 SSH）..."
     case "${OS_FAMILY}" in
-        debian) apt-get install -y fail2ban ;;
+        debian)
+            export DEBIAN_FRONTEND=noninteractive
+            export NEEDRESTART_MODE=a
+            apt-get install -y fail2ban
+            ;;
         rhel) ${PKG_MGR} install -y fail2ban ;;
         arch) pacman -Sy --noconfirm fail2ban ;;
         alpine) apk add --no-cache fail2ban ;;
