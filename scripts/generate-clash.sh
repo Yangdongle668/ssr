@@ -51,18 +51,21 @@ generate_yaml() {
 #  Clash 配置文件 (由 ssr-docker-deploy 生成)
 #  节点: ${remark}
 #  生成时间: $(date '+%Y-%m-%d %H:%M:%S')
+#
+#  规则源: Loyalsoldier/clash-rules (社区维护，每周自动更新)
+#  策略组: 13 组 (节点选择 / 自动选择 / 媒体 / 社交 / 服务 / AI 等)
 # ═══════════════════════════════════════════════════════════
 
 mixed-port: 7890
-allow-lan: false
+allow-lan: true
 bind-address: '*'
 mode: rule
 log-level: info
-ipv6: true
-external-controller: 127.0.0.1:9090
+ipv6: false
+external-controller: 0.0.0.0:9090
 secret: ''
 
-# ───── DNS 配置 (国内 + 海外 fallback) ─────
+# ───── DNS 配置 (国内 DoH + 海外 fallback) ─────
 dns:
   enable: true
   ipv6: false
@@ -72,12 +75,25 @@ dns:
   fake-ip-filter:
     - '*.lan'
     - '*.local'
+    - '+.pool.ntp.org'
     - 'localhost.ptlogin2.qq.com'
+    - 'msftconnecttest.com'
+    - 'msftncsi.com'
     - 'stun.*.*'
     - 'stun.*.*.*'
+    - '+.stun.*.*'
+    - '+.stun.*.*.*'
+    - '+.stun.*.*.*.*'
+    - '*.n.n.srv.nintendo.net'
+    - '+.lan'
+    - '+.srv.nintendo.net'
+    - 'xbox.*.*.microsoft.com'
+    - '*.*.xboxlive.com'
+    - 'WORKGROUP'
   default-nameserver:
     - 119.29.29.29
     - 223.5.5.5
+    - 114.114.114.114
   nameserver:
     - https://doh.pub/dns-query
     - https://dns.alidns.com/dns-query
@@ -87,11 +103,13 @@ dns:
     - https://1.1.1.1/dns-query
     - https://dns.google/dns-query
     - tls://1.0.0.1:853
+    - tls://dns.google
   fallback-filter:
     geoip: true
     geoip-code: CN
     ipcidr:
       - 240.0.0.0/4
+      - 0.0.0.0/32
 
 # ───── 代理节点 ─────
 proxies:
@@ -107,45 +125,88 @@ proxies:
     obfs-param: "${obfs_param}"
     udp: true
 
-# ───── 策略组 ─────
+# ───── 策略组 (13 组) ─────
 proxy-groups:
-  - name: 🚀 节点选择
+  - name: 🔰 节点选择
     type: select
     proxies:
       - ♻️ 自动选择
+      - 🎯 全球直连
       - "${remark}"
-      - DIRECT
 
   - name: ♻️ 自动选择
     type: url-test
-    proxies:
-      - "${remark}"
     url: http://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
+    proxies:
+      - "${remark}"
+
+  - name: 🎥 NETFLIX
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - ♻️ 自动选择
+      - "${remark}"
+      - 🎯 全球直连
 
   - name: 🌍 国外媒体
     type: select
     proxies:
-      - 🚀 节点选择
+      - 🔰 节点选择
       - ♻️ 自动选择
       - "${remark}"
-      - DIRECT
+      - 🎯 全球直连
 
-  - name: 📲 电报消息
+  - name: 🌏 国内媒体
     type: select
     proxies:
-      - 🚀 节点选择
+      - 🎯 全球直连
+      - 🔰 节点选择
+
+  - name: 📲 电报信息
+    type: select
+    proxies:
+      - 🔰 节点选择
       - "${remark}"
-      - DIRECT
+      - 🎯 全球直连
+
+  - name: 🤖 AI 服务
+    type: select
+    proxies:
+      - 🔰 节点选择
+      - ♻️ 自动选择
+      - "${remark}"
+      - 🎯 全球直连
 
   - name: 🍎 苹果服务
     type: select
     proxies:
-      - DIRECT
-      - 🚀 节点选择
+      - 🎯 全球直连
+      - 🔰 节点选择
+      - "${remark}"
 
-  - name: 🛑 广告拦截
+  - name: Ⓜ️ 微软服务
+    type: select
+    proxies:
+      - 🎯 全球直连
+      - 🔰 节点选择
+      - "${remark}"
+
+  - name: ⛔️ 广告拦截
+    type: select
+    proxies:
+      - 🛑 全球拦截
+      - 🎯 全球直连
+      - 🔰 节点选择
+
+  - name: 🎯 全球直连
+    type: select
+    proxies:
+      - DIRECT
+      - 🔰 节点选择
+
+  - name: 🛑 全球拦截
     type: select
     proxies:
       - REJECT
@@ -154,106 +215,238 @@ proxy-groups:
   - name: 🐟 漏网之鱼
     type: select
     proxies:
-      - 🚀 节点选择
-      - DIRECT
+      - 🔰 节点选择
+      - 🎯 全球直连
+      - ♻️ 自动选择
       - "${remark}"
 
-# ───── 分流规则 ─────
+# ───── 远程规则集 (Loyalsoldier/clash-rules，每天自动更新) ─────
+rule-providers:
+  reject:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt"
+    path: ./ruleset/reject.yaml
+    interval: 86400
+
+  icloud:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/icloud.txt"
+    path: ./ruleset/icloud.yaml
+    interval: 86400
+
+  apple:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/apple.txt"
+    path: ./ruleset/apple.yaml
+    interval: 86400
+
+  google:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/google.txt"
+    path: ./ruleset/google.yaml
+    interval: 86400
+
+  proxy:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt"
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+
+  direct:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt"
+    path: ./ruleset/direct.yaml
+    interval: 86400
+
+  private:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt"
+    path: ./ruleset/private.yaml
+    interval: 86400
+
+  gfw:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/gfw.txt"
+    path: ./ruleset/gfw.yaml
+    interval: 86400
+
+  tld-not-cn:
+    type: http
+    behavior: domain
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/tld-not-cn.txt"
+    path: ./ruleset/tld-not-cn.yaml
+    interval: 86400
+
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/telegramcidr.txt"
+    path: ./ruleset/telegramcidr.yaml
+    interval: 86400
+
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt"
+    path: ./ruleset/cncidr.yaml
+    interval: 86400
+
+  lancidr:
+    type: http
+    behavior: ipcidr
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt"
+    path: ./ruleset/lancidr.yaml
+    interval: 86400
+
+  applications:
+    type: http
+    behavior: classical
+    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/applications.txt"
+    path: ./ruleset/applications.yaml
+    interval: 86400
+
+# ───── 分流规则 (优先级从上到下) ─────
 rules:
-  # 局域网与保留地址
-  - DOMAIN-SUFFIX,local,DIRECT
-  - DOMAIN-SUFFIX,localhost,DIRECT
-  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
-  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
-  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
-  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
-  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
-  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
-  - IP-CIDR6,::1/128,DIRECT,no-resolve
-  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
-  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+  # ─── AI 服务（最高优先级，避免被其它规则匹配走错组）───
+  - DOMAIN-SUFFIX,openai.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,oaistatic.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,oaiusercontent.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,chatgpt.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,anthropic.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,claude.ai,🤖 AI 服务
+  - DOMAIN-SUFFIX,anthropicusercontent.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,gemini.google.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,bard.google.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,perplexity.ai,🤖 AI 服务
+  - DOMAIN-SUFFIX,midjourney.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,poe.com,🤖 AI 服务
+  - DOMAIN-SUFFIX,character.ai,🤖 AI 服务
+  - DOMAIN-KEYWORD,openai,🤖 AI 服务
+  - DOMAIN-KEYWORD,anthropic,🤖 AI 服务
 
-  # 广告拦截
-  - DOMAIN-KEYWORD,admarvel,🛑 广告拦截
-  - DOMAIN-KEYWORD,admaster,🛑 广告拦截
-  - DOMAIN-KEYWORD,adsage,🛑 广告拦截
-  - DOMAIN-KEYWORD,adsmogo,🛑 广告拦截
-  - DOMAIN-KEYWORD,adsrvmedia,🛑 广告拦截
-  - DOMAIN-KEYWORD,adwords,🛑 广告拦截
-  - DOMAIN-KEYWORD,adservice,🛑 广告拦截
-  - DOMAIN-SUFFIX,doubleclick.net,🛑 广告拦截
+  # ─── Netflix 专组 ───
+  - DOMAIN-SUFFIX,netflix.com,🎥 NETFLIX
+  - DOMAIN-SUFFIX,netflix.net,🎥 NETFLIX
+  - DOMAIN-SUFFIX,nflxext.com,🎥 NETFLIX
+  - DOMAIN-SUFFIX,nflximg.com,🎥 NETFLIX
+  - DOMAIN-SUFFIX,nflximg.net,🎥 NETFLIX
+  - DOMAIN-SUFFIX,nflxso.net,🎥 NETFLIX
+  - DOMAIN-SUFFIX,nflxvideo.net,🎥 NETFLIX
+  - DOMAIN-KEYWORD,netflix,🎥 NETFLIX
 
-  # 苹果服务
-  - DOMAIN-SUFFIX,apple.com,🍎 苹果服务
-  - DOMAIN-SUFFIX,icloud.com,🍎 苹果服务
-  - DOMAIN-SUFFIX,icloud-content.com,🍎 苹果服务
-  - DOMAIN-SUFFIX,me.com,🍎 苹果服务
-  - DOMAIN-SUFFIX,mzstatic.com,🍎 苹果服务
+  # ─── 应用进程直连 (BT/迅雷/网盘客户端) ───
+  - RULE-SET,applications,🎯 全球直连
 
-  # Telegram
-  - DOMAIN-SUFFIX,t.me,📲 电报消息
-  - DOMAIN-SUFFIX,tdesktop.com,📲 电报消息
-  - DOMAIN-SUFFIX,telegra.ph,📲 电报消息
-  - DOMAIN-SUFFIX,telegram.me,📲 电报消息
-  - DOMAIN-SUFFIX,telegram.org,📲 电报消息
-  - IP-CIDR,91.108.4.0/22,📲 电报消息,no-resolve
-  - IP-CIDR,91.108.8.0/22,📲 电报消息,no-resolve
-  - IP-CIDR,91.108.12.0/22,📲 电报消息,no-resolve
-  - IP-CIDR,91.108.16.0/22,📲 电报消息,no-resolve
-  - IP-CIDR,91.108.56.0/22,📲 电报消息,no-resolve
-  - IP-CIDR,149.154.160.0/20,📲 电报消息,no-resolve
+  # ─── 局域网 / 私有网络 ───
+  - DOMAIN,clash.razord.top,🎯 全球直连
+  - DOMAIN,yacd.haishan.me,🎯 全球直连
+  - DOMAIN,yacd.metacubex.one,🎯 全球直连
+  - DOMAIN,d.metacubex.one,🎯 全球直连
+  - RULE-SET,private,🎯 全球直连
+  - RULE-SET,lancidr,🎯 全球直连,no-resolve
 
-  # 国外媒体
-  - DOMAIN-KEYWORD,youtube,🌍 国外媒体
+  # ─── 广告拦截 / 隐私追踪 / 挖矿 (规则集，30000+ 条) ───
+  - RULE-SET,reject,⛔️ 广告拦截
+
+  # ─── Apple 服务 (国内 CDN 直连更快) ───
+  - RULE-SET,icloud,🍎 苹果服务
+  - RULE-SET,apple,🍎 苹果服务
+
+  # ─── 微软服务 ───
+  - DOMAIN-SUFFIX,office.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,office.net,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,office365.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,microsoft.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,microsoftonline.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,onedrive.live.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,sharepoint.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,sharepointonline.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,outlook.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,live.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,bing.com,Ⓜ️ 微软服务
+  - DOMAIN-SUFFIX,msftconnecttest.com,Ⓜ️ 微软服务
+
+  # ─── Google 服务 ───
+  - RULE-SET,google,🔰 节点选择
+
+  # ─── Telegram (域名 + IP 段) ───
+  - DOMAIN-SUFFIX,t.me,📲 电报信息
+  - DOMAIN-SUFFIX,tdesktop.com,📲 电报信息
+  - DOMAIN-SUFFIX,telegra.ph,📲 电报信息
+  - DOMAIN-SUFFIX,telegram.me,📲 电报信息
+  - DOMAIN-SUFFIX,telegram.org,📲 电报信息
+  - DOMAIN-SUFFIX,telesco.pe,📲 电报信息
+  - RULE-SET,telegramcidr,📲 电报信息,no-resolve
+
+  # ─── 国内常用媒体 (B站/爱奇艺/优酷等) ───
+  - DOMAIN-SUFFIX,bilibili.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,bilivideo.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,hdslb.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,iqiyi.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,iqiyipic.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,qy.net,🌏 国内媒体
+  - DOMAIN-SUFFIX,youku.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,mgtv.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,tudou.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,le.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,ku6.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,music.163.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,kuwo.cn,🌏 国内媒体
+  - DOMAIN-SUFFIX,kugou.com,🌏 国内媒体
+  - DOMAIN-SUFFIX,xiami.com,🌏 国内媒体
+
+  # ─── 国外媒体 (YouTube/Twitch/Spotify/HBO等) ───
+  - DOMAIN-SUFFIX,youtube.com,🌍 国外媒体
   - DOMAIN-SUFFIX,googlevideo.com,🌍 国外媒体
   - DOMAIN-SUFFIX,ytimg.com,🌍 国外媒体
-  - DOMAIN-SUFFIX,netflix.com,🌍 国外媒体
-  - DOMAIN-SUFFIX,nflxvideo.net,🌍 国外媒体
-  - DOMAIN-SUFFIX,nflxext.com,🌍 国外媒体
-  - DOMAIN-SUFFIX,nflximg.com,🌍 国外媒体
-  - DOMAIN-SUFFIX,nflximg.net,🌍 国外媒体
-  - DOMAIN-SUFFIX,disney-plus.net,🌍 国外媒体
+  - DOMAIN-SUFFIX,youtu.be,🌍 国外媒体
   - DOMAIN-SUFFIX,disneyplus.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,disney-plus.net,🌍 国外媒体
+  - DOMAIN-SUFFIX,disney.io,🌍 国外媒体
+  - DOMAIN-SUFFIX,bamgrid.com,🌍 国外媒体
   - DOMAIN-SUFFIX,hbo.com,🌍 国外媒体
   - DOMAIN-SUFFIX,hbomax.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,hbomaxcdn.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,hbogo.com,🌍 国外媒体
   - DOMAIN-SUFFIX,spotify.com,🌍 国外媒体
   - DOMAIN-SUFFIX,scdn.co,🌍 国外媒体
   - DOMAIN-SUFFIX,twitch.tv,🌍 国外媒体
   - DOMAIN-SUFFIX,twitchcdn.net,🌍 国外媒体
+  - DOMAIN-SUFFIX,jtvnw.net,🌍 国外媒体
+  - DOMAIN-SUFFIX,ttvnw.net,🌍 国外媒体
+  - DOMAIN-SUFFIX,primevideo.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,amazonvideo.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,bbc.com,🌍 国外媒体
+  - DOMAIN-SUFFIX,bbc.co.uk,🌍 国外媒体
+  - DOMAIN-SUFFIX,bbci.co.uk,🌍 国外媒体
+  - DOMAIN-SUFFIX,abema.tv,🌍 国外媒体
+  - DOMAIN-SUFFIX,bahamut.com.tw,🌍 国外媒体
+  - DOMAIN-SUFFIX,gamer.com.tw,🌍 国外媒体
+  - DOMAIN-SUFFIX,niconico.jp,🌍 国外媒体
+  - DOMAIN-SUFFIX,nicovideo.jp,🌍 国外媒体
 
-  # 常见代理目标
-  - DOMAIN-KEYWORD,google,🚀 节点选择
-  - DOMAIN-KEYWORD,facebook,🚀 节点选择
-  - DOMAIN-KEYWORD,twitter,🚀 节点选择
-  - DOMAIN-KEYWORD,instagram,🚀 节点选择
-  - DOMAIN-KEYWORD,github,🚀 节点选择
-  - DOMAIN-SUFFIX,openai.com,🚀 节点选择
-  - DOMAIN-SUFFIX,anthropic.com,🚀 节点选择
-  - DOMAIN-SUFFIX,claude.ai,🚀 节点选择
-  - DOMAIN-SUFFIX,wikipedia.org,🚀 节点选择
+  # ─── 代理域名 (GFW列表 + 常见需翻墙的) ───
+  - RULE-SET,proxy,🔰 节点选择
+  - RULE-SET,gfw,🔰 节点选择
+  - RULE-SET,tld-not-cn,🔰 节点选择
 
-  # 国内常见域名直连
-  - DOMAIN-SUFFIX,cn,DIRECT
-  - DOMAIN-KEYWORD,baidu,DIRECT
-  - DOMAIN-KEYWORD,taobao,DIRECT
-  - DOMAIN-KEYWORD,alipay,DIRECT
-  - DOMAIN-KEYWORD,jd,DIRECT
-  - DOMAIN-KEYWORD,qq,DIRECT
-  - DOMAIN-KEYWORD,wechat,DIRECT
-  - DOMAIN-KEYWORD,weibo,DIRECT
-  - DOMAIN-KEYWORD,bilibili,DIRECT
-  - DOMAIN-KEYWORD,iqiyi,DIRECT
-  - DOMAIN-KEYWORD,youku,DIRECT
-  - DOMAIN-KEYWORD,xunlei,DIRECT
-  - DOMAIN-KEYWORD,163,DIRECT
-  - DOMAIN-KEYWORD,126,DIRECT
-  - DOMAIN-SUFFIX,music.163.com,DIRECT
+  # ─── 国内域名 ───
+  - RULE-SET,direct,🎯 全球直连
 
-  # GEOIP 兜底
-  - GEOIP,LAN,DIRECT,no-resolve
-  - GEOIP,CN,DIRECT,no-resolve
+  # ─── GeoIP 兜底 ───
+  - RULE-SET,cncidr,🎯 全球直连,no-resolve
+  - GEOIP,LAN,🎯 全球直连,no-resolve
+  - GEOIP,CN,🎯 全球直连,no-resolve
 
-  # 漏网之鱼
+  # ─── 漏网之鱼 ───
   - MATCH,🐟 漏网之鱼
 EOF
 }
