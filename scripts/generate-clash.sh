@@ -204,7 +204,6 @@ proxy-groups:
     type: select
     proxies:
       - DIRECT
-      - 🔰 节点选择
 
   - name: 🛑 全球拦截
     type: select
